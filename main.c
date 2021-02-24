@@ -71,7 +71,7 @@ void trabalha_linha_de_comando(char *linha){
     LinhaDeComando toWork = monta_linha_de_comando(linha);
     //todo realizar os pipes
     for (int i = 0; i < toWork.qtd_comandos; ++i) {
-
+        printf("%s -> %s\n", toWork.comandos[i].comando_raw, toWork.comandos[i].parametros);
     }
 }
 
