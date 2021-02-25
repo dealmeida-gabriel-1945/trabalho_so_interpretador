@@ -13,198 +13,207 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+int validaComandoCompleto(char *comando_completo);
 int checkFilePath(char *path);
 void imprime(char* s);
-char** getArgs(char** args, char* entrada, int *size);
-char **getRedirect(char **args, int size, int* redirectSize);
-char** getArgsSemRedirect(char** args, char** args_sem_redirect, int size, int*args_sem_redirect_size);
+char** monta_argumentos(char** argumentos, char* comando_completo, int* tamanho);
+char** monta_argumentos_sem_redirect(char** argumentos, char** argumentos_sem_redirect, int tamanho, int* tamanho_argumentos_sem_redirect);
+char** pega_redirect(char** argumentos, int tamanho, int* tamanho_redirect);
 
+/*COSMETICO*/
 void cabecalho();
+void marcaPadrao();
 void despedida();
 
+/*ERROS*/
+void showErro(char *erro);
+void showErroDup();
+void showErroPath();
+void showErroPipe();
+void showErroFork();
+void showErroRealocacao();
+void showErroComandoIndevido();
+
+//=====================================CONSTANTES
+/*CONSTANTES NUMÉRICAS*/
 #define MAX_STR_LENGTH 256
+
+#define TRUE 1
+#define FALSE 0
+
+#define READ_END    0
+#define WRITE_END	1
+
+/*CONSTANTES STRINGS*/
+#define STR_BREAK_LINE "\n"
+#define STR_SPACE " "
+#define STR_BIN_PATH "/bin/"
+#define STR_HOME_PATH "/home/"
+
+/*CONSTANTES CHAR*/
+#define CHAR_BREAK_LINE '\n'
+#define CHAR_SPACE ' '
+#define CHAR_END_OF_STRING '\0'
+
 #define STR_SAIDA "sair"
 #define STR_PIPE "|"
-#define STR_SPACE " "
-#define CHAR_SPACE ' '
-#define STR_QUEBRA_LINHA "\n"
-#define CHAR_BREAK_LINE '\n'
+#define STR_ARROW_LEFT "<"
+#define STR_ARROW_RIGTH ">"
 
 int main(int argc, char const *argv[]){
 
-    char* entrada = (char*)malloc(1024*sizeof(char));
+    char *comando_completo   = (char*) malloc(MAX_STR_LENGTH * sizeof(char));
+    char *comando_path      = (char*) malloc(MAX_STR_LENGTH * sizeof(char));
+    char *filepath  = (char*) malloc(MAX_STR_LENGTH * sizeof(char));
+    char *buffer    = (char*) malloc(MAX_STR_LENGTH * sizeof(char));
+    //verifica se todas as alocações funcionaram
+    if((comando_completo == NULL) || (filepath == NULL) || (buffer == NULL) || (comando_path == NULL)){
+        showErroRealocacao();
+        return 1;
+    }
+
+    int fd[2];
+    int pid;
+    int tamanho_redirect = 0;
+    int args_sem_redirect_size;
+    int status;
+    int tamanho = 0;
+
+    char ch;
+    char **argumentos;
+    char **argumentos_sem_redirect;
+    char **redirect;
 
     cabecalho();
 
-    int cp[2];
-    int pid;
-    char ch;
-    char *path = calloc(1024, sizeof(char));
-
-    char **args;
-    int status;
-    int size = 0;
-    char **redirect;
-    char **args_sem_redirect;
-    int args_sem_redirect_size;
-    char *filepath = (char*)calloc( 1024, sizeof(char) );
-    char *buffer = (char*)calloc( 1024, sizeof(char) );
-
-    while(1){
-        printf("\nಠ_ಠ ");
-
-        fgets(entrada, 1024, stdin);
-
-        if(entrada[strlen(entrada)-1] == '\n'){
-            entrada[strlen(entrada)-1] = '\0';
+    while(1 == 1){
+        //mostra a marca padrão
+        marcaPadrao();
+        //recolhe a string
+        fgets(comando_completo, MAX_STR_LENGTH, stdin);
+        //adiciona o \0 no fim da string
+        if(comando_completo[strlen(comando_completo) - 1] == CHAR_BREAK_LINE){
+            comando_completo[strlen(comando_completo) - 1] =  CHAR_END_OF_STRING;
         }
-
-        if(!strcmp(entrada, STR_SAIDA)){
+        //se a string for a de saída, BREAK!
+        if(strcmp(comando_completo, STR_SAIDA) == 0){
             break;
         }
-
-        if(!strcmp(entrada, "\n")){
-            continue;
+        //verifica se o comando é indevido
+        if(validaComandoCompleto(comando_completo) == FALSE){
+            showErroComandoIndevido();
         }
-
-        if( pipe(cp) < 0 ){
-            perror("pipe nao pode ser feito");
-            exit(1);
+        //erro na criação do pipe
+        if(pipe(fd) == -1){
+            showErroPipe();
+            return 1;
         }
+        //recolhe os argumentos do comando_completo
+        argumentos = monta_argumentos(argumentos, comando_completo, &tamanho);
 
-        args = getArgs(args, entrada, &size);
+        /*monta o path para o comando*/
+        //primeiro se adiciona o "/bin/"
+        strcpy(comando_path, STR_BIN_PATH);
+        //depois adiciona o primeiro item do vetor de argumentos, que é o comando
+        strcat(comando_path, argumentos[0]);
 
-        // for (int i = 0; i < size; ++i){
-        // 	printf("%s\n", args[i]);
-        // }
-
-        sprintf(path, "/bin/%s", args[0]);
-        int redirectSize = 0;
-        if ( redirect = getRedirect(args, size, &redirectSize) ){
-            // for (int i = 0; i < 2; ++i){
-            // 	printf("%s\n", redirect[i]);
-            // }
-
-            args_sem_redirect = getArgsSemRedirect(args, args_sem_redirect, size, &args_sem_redirect_size);
-
-            // for (int i = 0; i < 2; ++i){
-            // 	printf("%s\n", args_sem_redirect[i]);
-            // }
-
-
-            for (int i = 0; i < redirectSize; ++i){
-                if( !strcmp(redirect[i], "=>") ){
-
-                    switch( pid = fork() ){
-                        case -1:
-                            perror("Can't fork");
-                            exit(1);
-                        case 0:
-                            dup2(cp[1], 1);
-                            close( cp[0]);
-                            execvp(path, args_sem_redirect);
-                            perror("No exec");
-                            exit(1);
-
-                        default:
-
-                            waitpid(pid, &status, WCONTINUED);
-                            close(cp[1]);
+        redirect = pega_redirect(argumentos, tamanho, &tamanho_redirect);
+        //se tiver redirecuionamento
+        if (redirect != NULL){
+            //monta o vetor de argumentos sem o redirect
+            argumentos_sem_redirect = monta_argumentos_sem_redirect(argumentos, argumentos_sem_redirect, tamanho, &args_sem_redirect_size);
+            for (int i = 0; i < tamanho_redirect; i++){
+                if(strcmp(redirect[i], STR_ARROW_RIGTH) != 0){
+                    //realiza o fork
+                    pid = fork();
+                    if(pid < 0){            //ERRO
+                        showErroFork();
+                        exit(1);
+                    }else if(pid == 0){     //PROCESSO FILHO
+                        dup2(fd[WRITE_END], 1);
+                        close( fd[READ_END]);
+                        execvp(comando_path, argumentos_sem_redirect);
+                        showErroDup();
+                        exit(1);
+                    }else{                  //PROCESSO PAI
+                        waitpid(pid, &status, WCONTINUED);
+                        close(fd[WRITE_END]);
                     }
 
+                    //realiza o fork
+                    pid = fork();
+                    if(pid < 0){            //ERRO
+                        showErroPipe();
+                        exit(1);
+                    }else if (pid == 0){   //PROCESSO FILHO
+                        close(fd[WRITE_END]);
+                        //gerta o path do output file
+                        strcpy(filepath, STR_HOME_PATH);
+                        strcat(filepath, redirect[i + 1]);
 
-                    switch(pid = fork()) {
-                        case -1:
-                            perror("Can't fork");
-                            exit(1);
-                        case 0:
-                            //define o caminho para o arquivo de saida
-                            close(cp[1]);
-                            sprintf(filepath,"/home/%s", redirect[i+1]);
-
-                            int filedesc = open(filepath, O_CREAT | O_WRONLY);
-
-                            while(read(cp[0], &ch, 1)>0) {
-
-                                write(filedesc, &ch, 1);
-                            }
-
-                            close( cp[0]);
-
-                            exit(1);
-                        default:
-                            waitpid(pid, &status, WCONTINUED);
-
+                        //abre arquivo de saída
+                        int filedesc = open(filepath, O_CREAT | O_WRONLY);
+                        //escreve o arquivo de saída
+                        while(read(fd[0], &ch, 1)>0) {
+                            write(filedesc, &ch, 1);
+                        }
+                        //fecha o arquivo de saída
+                        close( fd[0]);
+                        exit(1);
+                    }else{                  //PROCESSO PAI
+                        //espera
+                        waitpid(pid, &status, WCONTINUED);
                     }
-                }else if( !strcmp(redirect[i], "<=") ){
-
-                    switch(pid = fork()) {
-                        case -1:
-                            perror("Can't fork");
+                }else if(strcmp(redirect[i], STR_ARROW_LEFT) != 0){
+                    //realiza o fork
+                    pid = fork();
+                    if(pid < 0){            //ERRO
+                        showErroFork();
+                        exit(1);
+                    }else if(pid == 0){     //PROCESSO
+                        strcpy(filepath, STR_HOME_PATH);
+                        strcat(filepath, redirect[i + 1]);
+                        if(checkFilePath(filepath) == FALSE){
+                            showErroPath();
                             exit(1);
-                        case 0:
+                        }
 
-                            sprintf(filepath, "/home/analele/Área de trabalho/SO_2019/%s", redirect[i+1]);
-                            if(!checkFilePath(filepath)){
-                                printf("Arquivo não valido", filepath);
-                            }
-
-                            int filedesc = open(filepath, O_RDONLY);
-                            dup2(filedesc,0);
-                            dup2(cp[1],1);
-                            while(read(filedesc, &ch, 1)){
-                                write(cp[1], &ch, 1);
-                            }
-                            close(cp[0]);
-
-                            exit(1);
-
-
-                        default:
-
-                            waitpid(pid, &status, WCONTINUED);
-                            close(cp[1]);
-
+                        int filedesc = open(filepath, O_RDONLY);
+                        dup2(filedesc,0);
+                        dup2(fd[1],1);
+                        while(read(filedesc, &ch, 1)){
+                            write(fd[1], &ch, 1);
+                        }
+                        close(fd[READ_END]);
+                        exit(1);
+                    }else{                  //PROCESSO PAI
+                        //espera
+                        waitpid(pid, &status, WCONTINUED);
+                        close(fd[WRITE_END]);
                     }
 
-                    switch(pid = fork()) {
-                        case -1:
-                            perror("Can't fork");
-                            exit(1);
-                        case 0:
-
-
-                            dup2(cp[0],0);
-
-                            read(cp[0], buffer, 1024);
-
-                            args[args_sem_redirect_size+1] = buffer;
-                            args[args_sem_redirect_size+2] = NULL;
-
-                            for (int i = 0; i < args_sem_redirect_size; ++i){
-                                printf("%s\n", args[i]);
-                            }
-
-
-                            execvp(path, args);
-                            perror("No exec");
-
-                            exit(1);
-
-
-                        default:
-
-                            waitpid(pid, &status, WCONTINUED);
-                            close(cp[0]);
-
+                    //realiza fork
+                    pid = fork();
+                    if(pid < 0){            //ERRO
+                        showErroFork();
+                        exit(1);
+                    }else if(pid == 0){     //PROCESSO
+                        dup2(fd[READ_END],0);
+                        read(fd[READ_END], buffer, MAX_STR_LENGTH);
+                        argumentos[args_sem_redirect_size+1] = buffer;
+                        argumentos[args_sem_redirect_size+2] = NULL;
+                        for (int i = 0; i < args_sem_redirect_size; i++){
+                            printf("%s\n", argumentos[i]);
+                        }
+                        execvp(comando_path, argumentos);
+                        exit(1);
+                    }else{                  //PROCESSO PAI
+                        waitpid(pid, &status, WCONTINUED);
+                        close(fd[0]);
                     }
                 }
             }
-
-
-
-
-        }else{
+        }else{//todo continuar mascaração
 
             switch( pid = fork()){
 
@@ -213,17 +222,17 @@ int main(int argc, char const *argv[]){
                     exit(1);
                 case 0:
 
-                    close(cp[0]);
-                    dup2(cp[1], 1);
-                    execvp(path, args);
+                    close(fd[0]);
+                    dup2(fd[1], 1);
+                    execvp(comando_path, argumentos);
                     perror("nao pode executar");
                     exit(1);
                 default:
-                    close(cp[1]);
+                    close(fd[1]);
 
                     waitpid(pid, NULL, WCONTINUED);
 
-                    while(read(cp[0], &ch, 1) > 0){
+                    while(read(fd[0], &ch, 1) > 0){
                         write(0, &ch, 1);
                     }
 
@@ -238,96 +247,130 @@ int main(int argc, char const *argv[]){
     return 0;
 }
 
+int validaComandoCompleto(char *comando_completo){
+    //se a string tive apenas um \n, é um comando indevido
+    if(strcmp(comando_completo, STR_BREAK_LINE) == 0){
+        return FALSE;
+    }
+    //comando válido para ser executado
+    return TRUE;
+}
+
 int checkFilePath(char *path){
-    FILE *f;
-    if(fopen(path, "r")){
-        return 1;
-    }else{
-        return 0;
-    }
+    return fopen(path, "r") ? TRUE : FALSE;
 }
 
-char** getArgsSemRedirect(char** args, char** args_sem_redirect, int size, int*args_sem_redirect_size){
+char** monta_argumentos_sem_redirect(char** argumentos, char** argumentos_sem_redirect, int tamanho, int* tamanho_argumentos_sem_redirect){
+    //pega o ultimo index que possui as arrows
+    for (int i = 0; i < tamanho; i++){
+        if((strcmp(argumentos[i], STR_ARROW_RIGTH) == 0) || (strcmp(argumentos[i], STR_ARROW_LEFT) == 0)){
+            (*tamanho_argumentos_sem_redirect) = i;
+        }
+    }
+    //aloca o vetor de strings
+    argumentos_sem_redirect = (char**) malloc((*tamanho_argumentos_sem_redirect) * sizeof(char*));
+    if(argumentos_sem_redirect == NULL){
+        showErroRealocacao();
+        exit(1);
+    }
+    //aloca as strings
+    for (int i = 0; i < (*tamanho_argumentos_sem_redirect); i++){
+        argumentos_sem_redirect[i] = (char*) malloc(MAX_STR_LENGTH * sizeof(char));
+        if(argumentos_sem_redirect[i] == NULL){
+            showErroRealocacao();
+            exit(1);
+        }
+    }
+    //copia cada argumento para dentro do vetor
+    for (int i = 0; i < (*tamanho_argumentos_sem_redirect); i++){
+        strcpy(argumentos_sem_redirect[i], argumentos[i]);
+    }
 
-    for (int i = 0; i < size; ++i){
-        if( !strcmp(args[i], "=>") || !strcmp(args[i], "<=") ){
-            *args_sem_redirect_size = i;
+    return argumentos_sem_redirect;
+}
+
+char** pega_redirect(char** argumentos, int tamanho, int* tamanho_redirect){
+
+    char** redirecionamento;
+
+    //conta os redirects
+    for (int i = 0; i < tamanho; i++){
+        if((strcmp(argumentos[i], STR_ARROW_RIGTH) == 0) || (strcmp(argumentos[i], STR_ARROW_LEFT) == 0) ){
+            (*tamanho_redirect) += 1;
         }
     }
 
-    args_sem_redirect = (char**)malloc( *args_sem_redirect_size * sizeof(char*) );
-    for (int i = 0; i < *args_sem_redirect_size; ++i){
-        args_sem_redirect[i] = (char*)malloc( 1024 * sizeof(char) );
-    }
-
-    for (int i = 0; i < *args_sem_redirect_size; ++i){
-        strcpy(args_sem_redirect[i], args[i]);
-    }
-
-    return args_sem_redirect;
-}
-
-char **getRedirect(char **args, int size, int* redirectSize){
-
-    char** redirect;
-    for (int i = 0; i < size; ++i){
-        if( !strcmp(args[i], ">") || !strcmp(args[i], "<") ){
-            *redirectSize = *redirectSize + 1;
-        }
-    }
-    if(*redirectSize > 0){
-        *redirectSize = 2 * (*redirectSize);
+    if(*tamanho_redirect > 0){
+        *tamanho_redirect = 2 * (*tamanho_redirect);
         int j = 0;
-        redirect = (char**)malloc((*redirectSize) * sizeof(char*) );
-        for (int i = 0; i < (*redirectSize); ++i){
-            redirect[i] = (char*)malloc( 1024 * sizeof(char) );
+        //aloca o tamanho necessário
+        redirecionamento = (char**) malloc((*tamanho_redirect) * sizeof(char*));
+        if (redirecionamento == NULL){
+            showErroRealocacao();
+            exit(1);
         }
-        for (int i = 0; i < size; ++i){
-            if( !strcmp(args[i], ">") || !strcmp(args[i], "<") ){
-
-
-                strcpy(redirect[j], args[i]);
+        //aloca cada parte do vetor redirecionamento
+        for (int i = 0; i < (*tamanho_redirect); i++){
+            redirecionamento[i] = (char*) malloc(MAX_STR_LENGTH * sizeof(char));
+            if(redirecionamento[i] == NULL){
+                showErroRealocacao();
+                exit(1);
+            }
+        }
+        for (int i = 0; i < tamanho; i++){
+            if((strcmp(argumentos[i], STR_ARROW_RIGTH) == 0) || (strcmp(argumentos[i], STR_ARROW_LEFT) == 0) ){
+                //copia o conteúdo de argumentos[i] para redirecionamento[j]
+                strcpy(redirecionamento[j], argumentos[i]);
                 j++;
-                strcpy(redirect[j], args[i+1]);
+                strcpy(redirecionamento[j], argumentos[i + 1]);
                 j++;
             }
         }
 
-        return redirect;
-    }else{
-        return NULL;
+        return redirecionamento;
     }
+    return NULL;
 }
 
-char** getArgs(char** args, char* entrada, int* size){
-
-    char *copia = (char*)malloc(strlen(entrada)* sizeof(char));
-    strcpy(copia, entrada);
-
-    char *token;
-
-    /* get the first token */
-    token = strtok(copia, " ");
-
-    /* walk through other tokens */
-    *size = 0;
+char** monta_argumentos(char** argumentos, char* comando_completo, int* tamanho){
+    //monta uma cópia do comando completo
+    char *copia = (char*) malloc(strlen(comando_completo)* sizeof(char));
+    //assegura do tamanho do vetor de argumentos iniciar com zero
+    (*tamanho) = 0;
+    //se der falha na alocação, exit(1)
+    if(copia == NULL){
+        showErroRealocacao();
+        exit(1);
+    }
+    //copia o conteúdo do comando completo para a cópia
+    strcpy(copia, comando_completo);
+    //separa por espaços
+    char *token = strtok(copia, STR_SPACE);
     while( token != NULL ) {
         token = strtok(NULL, " ");
-        *size = *size + 1;
+        (*tamanho) = (*tamanho) + 1;
     }
-    args = (char**)malloc((*size) * sizeof(char*));
-    for(int j = 0; j < *size; j++){
-        args[j] = (char*)malloc(1024 * sizeof(char));
+    //faz um vetor se strings com o tamanho pego anteriormente
+    argumentos = (char**) malloc ((*tamanho) * sizeof(char*));
+    for(int i = 0; i < (*tamanho); i++){
+        argumentos[i] = (char*) malloc(MAX_STR_LENGTH * sizeof(char));
+        //verifica alocação
+        if(argumentos[i] == NULL){
+            showErroRealocacao();
+            exit(1);
+        }
     }
-    token = strtok(entrada, " ");
-    int i = 0;
+    //copia, novamente, o comando_completo para dentro da cópia
+    strcpy(copia, comando_completo);
+    //copia os argumentos
+    token = strtok(copia, STR_SPACE);
+    int cont = 0;
     while( token != NULL ) {
-        strcpy(args[i], token);
-        token = strtok(NULL, " ");
-        i++;
+        strcpy(argumentos[cont], token);
+        token = strtok(NULL, STR_SPACE);
+        cont++;
     }
-
-    return args;
+    return argumentos;
 
 }
 
@@ -335,15 +378,43 @@ void imprime(char* s){
     printf("%s\n", s);
 }
 
-
+/*COSMETICO*/
 void cabecalho(){
     printf("---------------------------------------------------------\n");
     printf("============TRABALHO DE SISTEMAS OPERACIONAIS============\n");
     printf("RESPONSÁVEIS:\n");
-    printf("\tDaianne Cynthia Leal, \n\tGabriel Guimarães de Almeida, \n\tRafael Neto\n");//todo inserir nome completo do Rafael
+    printf("\tDaianne Cynthia Leal, \n\tGabriel Guimarães de Almeida, \n\tRafael Augusto de Rezende Neto\n");//todo inserir nome completo do Rafael
     printf("Para sair digite: sair\n");
     printf("---------------------------------------------------------\n\n");
 }
 void despedida(){
     printf("\n.....................Stay safe! <3\n");
+}
+void marcaPadrao(){
+    printf("\nಠ_ಠ ");
+}
+
+/*ERROS*/
+void showErro(char *erro){
+    printf("\n#################################################################################\n");
+    printf("ERRO: %s", erro);
+    printf("\n#################################################################################\n");
+}
+void showErroRealocacao(){
+    showErro("Não foi possível realizar a alocação/realocação.");
+}
+void showErroPipe(){
+    showErro("Não foi possível realizar a criação do pipe.");
+}
+void showErroFork(){
+    showErro("Não foi possível realizar a criação do fork.");
+}
+void showErroComandoIndevido(){
+    showErro("Não foi possível executar o comando digitado.");
+}
+void showErroDup(){
+    showErro("Algo deu errado com o dup.");
+}
+void showErroPath(){
+    showErro("Path inválido.");
 }
