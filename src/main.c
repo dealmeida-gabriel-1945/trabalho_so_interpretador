@@ -8,10 +8,34 @@
 #include <signal.h>
 #include <stdio.h>
 
-#define LIMIT 256 // max number of tokens for a command
-#define MAXLINE 1024 // max number of characters from user input
-#define TRUE 1
-#define FALSE !TRUE
+/*===== CONSTANTES =====*/
+//NÚMEROS
+#define LIMITE 256              // Número máximo de tokens por comando
+#define MAX_STR_LENGTH 1024     // Quantidade máxima de caracteres da linha de comando inserida
+
+//STRINGS
+#define STR_SAIDA "sair\n"
+#define STR_VAZIA " \n\t"
+#define STR_LEFT_ARROW "<"
+#define STR_RIGTH_ARROW ">"
+#define STR_E_COMERCIAL "&"
+
+//CHAR
+#define CHAR_LEFT_ARROW '<'
+#define CHAR_RIGTH_ARROW '>'
+#define CHAR_E_COMERCIAL '&'
+
+//LÓGICOS
+#define TRUE 1          //Verdadeiro <-> true
+#define FALSE !TRUE     //Falso      <-> false
+
+/*===== SUBROTINAS =====*/
+//Decoração
+void cabecalho();
+void prefixo();
+void despedida();
+//Logica
+int trataComando(char* tokens[]);
 
 // Shell pid, pgid, terminal modes
 static pid_t GBSH_PID;
@@ -24,8 +48,6 @@ extern char** environ;
 
 struct sigaction act_child;
 struct sigaction act_int;
-
-int no_reprint_prmpt;
 
 pid_t pid;
 
@@ -42,71 +64,8 @@ void signalHandler_int(int p);
 int changeDirectory(char * args[]);
 
 /**
- * Function used to initialize our shell. We used the approach explained in
- * http://www.gnu.org/software/libc/manual/html_node/Initializing-the-Shell.html
- */
-void init(){
-    // See if we are running interactively
-    GBSH_PID = getpid();
-    // The shell is interactive if STDIN is the terminal
-    GBSH_IS_INTERACTIVE = isatty(STDIN_FILENO);
-
-    if (GBSH_IS_INTERACTIVE) {
-        // Loop until we are in the foreground
-        while (tcgetpgrp(STDIN_FILENO) != (GBSH_PGID = getpgrp()))
-            kill(GBSH_PID, SIGTTIN);
-
-
-        // Set the signal handlers for SIGCHILD and SIGINT
-        act_child.sa_handler = signalHandler_child;
-        act_int.sa_handler = signalHandler_int;
-
-        /**The sigaction structure is defined as something like
-
-        struct sigaction {
-            void (*sa_handler)(int);
-            void (*sa_sigaction)(int, siginfo_t *, void *);
-            sigset_t sa_mask;
-            int sa_flags;
-            void (*sa_restorer)(void);
-
-        }*/
-
-        sigaction(SIGCHLD, &act_child, 0);
-        sigaction(SIGINT, &act_int, 0);
-
-        // Put ourselves in our own process group
-        setpgid(GBSH_PID, GBSH_PID); // we make the shell process the new process group leader
-        GBSH_PGID = getpgrp();
-        if (GBSH_PID != GBSH_PGID) {
-            printf("Error, the shell is not process group leader");
-            exit(EXIT_FAILURE);
-        }
-        // Grab control of the terminal
-        tcsetpgrp(STDIN_FILENO, GBSH_PGID);
-
-        // Save default terminal attributes for shell
-        tcgetattr(STDIN_FILENO, &GBSH_TMODES);
-
-        // Get the current directory that will be used in different methods
-        currentDirectory = (char*) calloc(1024, sizeof(char));
-    } else {
-        printf("Could not make the shell interactive.\n");
-        exit(EXIT_FAILURE);
-    }
-}
-
-/**
  * Method used to print the welcome screen of our shell
  */
-void welcomeScreen(){
-    printf("\n\t============================================\n");
-    printf("\t               Simple C Shell\n");
-    printf("\t--------------------------------------------\n");
-    printf("\t             Licensed under GPLv3:\n");
-    printf("\t============================================\n");
-    printf("\n\n");
-}
 
 /**
  * SIGNAL HANDLERS
@@ -131,7 +90,6 @@ void signalHandler_int(int p){
     // We send a SIGTERM signal to the child process
     if (kill(pid,SIGTERM) == 0){
         printf("\nProcess %d received a SIGINT signal\n",pid);
-        no_reprint_prmpt = 1;
     }else{
         printf("\n");
     }
@@ -590,50 +548,130 @@ int commandHandler(char * args[]){
 * Main method of our shell
 */
 int main(int argc, char *argv[], char ** envp) {
-    char line[MAXLINE]; // buffer for the user input
-    char * tokens[LIMIT]; // array for the different tokens in the command
-    int numTokens;
+    char linha_comando[MAX_STR_LENGTH];     //Responsável por guardar o que o usuário digitar
+    char* tokens[LIMITE];                   //Array para armazenar os tokens da linha e comando
+    int qtdTokens;                          //Quantidade de tokens (controle do array)
 
-    no_reprint_prmpt = 0; 	// to prevent the printing of the shell
-    // after certain methods
-    pid = -10; // we initialize pid to an pid that is not possible
+    //Valor estepe
+    pid = -3;
+    //Chama o cabeçalho
+    cabecalho();
 
-    // We call the method of initialization and the welcome screen
-    init();
-    welcomeScreen();
+    //Loop de recolhimento dos comandos
+    while(1 == 1){
+        //Esvazia a string
+        linha_comando[0] = '\0';
 
-    // We set our extern char** environ to the environment, so that
-    // we can treat it later in other methods
-    environ = envp;
+        //Mostra o prefixo
+        prefixo();
 
-    // We set shell=<pathname>/simple-c-shell as an environment variable for
-    // the child
-    setenv("shell",getcwd(currentDirectory, 1024),1);
+        //Recolheo que o usuário digitar
+        fgets(linha_comando, MAX_STR_LENGTH, stdin);
 
-    // Main loop, where the user input will be read and the prompt
-    // will be printed
-    while(TRUE){
-        // We print the shell prompt if necessary
-        if (no_reprint_prmpt == 0) shellPrompt();
-        no_reprint_prmpt = 0;
+        //Se for a ordem de saída, quebra o laço
+        if(strcmp(linha_comando, STR_SAIDA) == 0) break;
 
-        // We empty the line buffer
-        memset ( line, '\0', MAXLINE );
+        //strtok para verificar se foi escrito algo
+        char * token = strtok(linha_comando, STR_VAZIA);
+        tokens[0] = token;
 
-        // We wait for user input
-        fgets(line, MAXLINE, stdin);
+        if((strcmp(linha_comando, "\n")) != 0 && (tokens[0] != NULL)){
+            //Coleta os tokens
+            qtdTokens = 1;
+            //Executa enquanto o srtok não retornar NULL (short way de realizar strtok)
+            while((tokens[qtdTokens] = strtok(NULL, STR_VAZIA)) != NULL) qtdTokens++;
 
-        // If nothing is written, the loop is executed again
-        if((tokens[0] = strtok(line," \n\t")) == NULL) continue;
+            commandHandler(tokens);
+        }
+    }
+    //Mostra a mensagem e despedida
+    despedida();
+    exit(0);
+}
 
-        // We read all the tokens of the input and pass it to our
-        // commandHandler as the argument
-        numTokens = 1;
-        while((tokens[numTokens] = strtok(NULL, " \n\t")) != NULL) numTokens++;
+/*===== SUBROTINAS =====*/
+//Decoração
+void cabecalho(){
+    printf("---------------------------------------------------------\n");
+    printf("============TRABALHO DE SISTEMAS OPERACIONAIS============\n");
+    printf("RESPONSÁVEIS:\n");
+    printf("\tDaianne Cynthia Leal, \n\tGabriel Guimarães de Almeida, \n\tRafael Neto\n");//todo inserir nome completo do Rafael
+    printf("Para sair digite: sair\n");
+    printf("---------------------------------------------------------\n\n");
+}
+void despedida(){
+    printf("\n.....................Stay safe! ᕕ( ᐛ )ᕗ\n");
+}
+void prefixo(){
+    printf(" ᕕ(ಠ_ಠ)--☞ ");
+}
+//Logica
+int trataComando(char* tokens[]){
+    int i = 0, j = 0, descritorDeArquivo, out, aux, background = 0;
+    char *tokens_aux[LIMITE];
 
-        commandHandler(tokens);
-
+    //Separa sinais dos comandos (sinais: &, >, <)
+    while (tokens[j] != NULL){
+        //Se achar algum dos sinais, pare e continue a executar
+        if ((strcmp(tokens[j], STR_RIGTH_ARROW) == 0) || (strcmp(tokens[j], STR_LEFT_ARROW) == 0) || (strcmp(tokens[j], STR_E_COMERCIAL) == 0)){
+            break;
+        }
+        //Adiciona ao auxiliar os valores que não são sinais
+        tokens_aux[j] = tokens[j];
+        j++;
     }
 
-    exit(0);
+    //Aqui o auxiliar dos tokens terá apenas script, sem os sinais
+    //Aqui, também, será executado os comandos
+    while (tokens[i] != NULL){
+        //Se o comando
+        if (strcmp(tokens[i],"|") == 0){
+            pipeHandler(tokens);
+            return 1;
+            // If '<' is detected, we have Input and Output redirection.
+            // First we check if the structure given is the correct one,
+            // and if that is the case we call the appropriate method
+        }else if (strcmp(tokens[i],"<") == 0){
+            aux = i+1;
+            if (tokens[aux] == NULL || tokens[aux+1] == NULL || tokens[aux+2] == NULL ){
+                printf("Not enough input arguments\n");
+                return -1;
+            }else{
+                if (strcmp(tokens[aux+1],">") != 0){
+                    printf("Usage: Expected '>' and found %s\n",tokens[aux+1]);
+                    return -2;
+                }
+            }
+            fileIO(tokens_aux,tokens[i+1],tokens[i+3],1);
+            return 1;
+        }
+            // If '>' is detected, we have output redirection.
+            // First we check if the structure given is the correct one,
+            // and if that is the case we call the appropriate method
+        else if (strcmp(tokens[i],">") == 0){
+            if (tokens[i+1] == NULL){
+                printf("Not enough input arguments\n");
+                return -1;
+            }
+            fileIO(tokens_aux,NULL,tokens[i+1],0);
+            return 1;
+        }
+        i++;
+    }
+    // We launch the program with our method, indicating if we
+    // want background execution or not
+    tokens_aux[i] = NULL;
+    launchProg(tokens_aux,background);
+
+    /**
+     * For the part 1.e, we only had to print the input that was not
+     * 'exit', 'pwd' or 'clear'. We did it the following way
+     */
+    //	i = 0;
+    //	while(args[i]!=NULL){
+    //		printf("%s\n", args[i]);
+    //		i++;
+    //	}
+
+    return 1;
 }
