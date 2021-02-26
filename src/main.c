@@ -33,13 +33,17 @@
 #define FALSE !TRUE     //Falso      <-> false
 
 /*===== SUBROTINAS =====*/
-//Decoração
+//DECORAÇÃO
 void cabecalho();
 void prefixo();
 void despedida();
-//Logica
+//LÓGICA
 int trataComando(char* tokens[]);
 void trataPipe(char* tokens[]);
+int verificaQuantidadeComandos(char *tokens[]);
+//ERROS
+void showErro(char* toShow);
+void showErroExecutarFork();
 
 // Shell pid, pgid, terminal modes
 static pid_t GBSH_PID;
@@ -522,7 +526,6 @@ void trataPipe(char * tokens[]){
     int loop_1 = 0;
     int loop_2 = 0;
     int loop_3 = 0;
-    int loop_4 = 0;
     //Tickets
     /*
      * 0 READ (READ_END)
@@ -530,92 +533,58 @@ void trataPipe(char * tokens[]){
      * */
     int des_p_1[2], des_p_2[2];
     //Controles
-    int num_cmds = 0, finalizar = 0;
-    //Vetor comandos
-    char *comandos[256];
+    int qtdComandos = verificaQuantidadeComandos(tokens);
+    int finalizar = 0;
+    //Vetor comandos auxiliar
+    char *comandos[LIMITE];
     //Objeto do PId
     pid_t pid;
 
-    // First we calculate the number of commands (they are separated
-    // by '|')
-    while (tokens[loop_4] != NULL){
-        if (strcmp(tokens[loop_4], STR_PIPE) == 0){
-            num_cmds++;
-        }
-        loop_4++;
-    }
-    num_cmds++;
 
-    // Main loop of this method. For each command between '|', the
-    // pipes will be configured and standard input and/or output will
-    // be replaced. Then it will be executed
-    while (tokens[loop_2] != NULL && finalizar != 1){
+    //Laço que executará os pipes
+    while ((tokens[loop_2] != NULL) && (finalizar != 1)){
         loop_3 = 0;
-        // We use an auxiliary array of pointers to store the command
-        // that will be executed on each iteration
         while (strcmp(tokens[loop_2], STR_PIPE) != 0){
             comandos[loop_3] = tokens[loop_2];
             loop_2++;
+            //Se não há mais argumentos, finalize
             if (tokens[loop_2] == NULL){
-                // 'end' variable used to keep the program from entering
-                // again in the loop when no more arguments are found
-                finalizar = 1;
                 loop_3++;
+                finalizar = 1;
                 break;
             }
             loop_3++;
         }
-        // Last position of the command will be NULL to indicate that
-        // it is its end when we pass it to the exec function
+        //Posição final para indicar a passagem pro exec
         comandos[loop_3] = NULL;
         loop_2++;
 
-        // Depending on whether we are in an iteration or another, we
-        // will set different descriptors for the pipes inputs and
-        // output. This way, a pipe will be shared between each two
-        // iterations, enabling us to connect the inputs and outputs of
-        // the two different commands.
-        if (loop_1 % 2 != 0){
-            pipe(des_p_1); // for odd i
-        }else{
-            pipe(des_p_2); // for even i
-        }
+        /*
+         *  Pipe sendo compartilhado entre iterações para tornar possíveis as operações de outputs e inputs
+         * entre dois comandos.
+        */
+        pipe(((loop_1 % 2) != 0) ? des_p_1 : des_p_2);
+        //Realiza o fork
+        pid = fork();
 
-        pid=fork();
-
-        if(pid==-1){
-            if (loop_1 != num_cmds - 1){
-                if (loop_1 % 2 != 0){
-                    close(des_p_1[WRITE_END]); // for odd i
-                }else{
-                    close(des_p_2[WRITE_END]); // for even i
-                }
-            }
-            printf("Child process could not be created\n");
+        //Erro ao criar o fork
+        if(pid == -1){
+            showErroExecutarFork();
+            close(((loop_1 % 2) != 0) ? des_p_1[WRITE_END] : des_p_2[WRITE_END]);
             return;
         }
-        if(pid==0){
-            // If we are in the first command
+        //Filho
+        if(pid == 0){
+            //Realiza o dup no primeiro comando
             if (loop_1 == 0){
                 dup2(des_p_2[WRITE_END], STDOUT_FILENO);
-            }
-                // If we are in the last command, depending on whether it
-                // is placed in an odd or even position, we will replace
-                // the standard input for one pipe or another. The standard
-                // output will be untouched because we want to see the
-                // output in the terminal
-            else if (loop_1 == num_cmds - 1){
-                if (num_cmds % 2 != 0){ // for odd number of commands
-                    dup2(des_p_1[READ_END],STDIN_FILENO);
-                }else{ // for even number of commands
-                    dup2(des_p_2[READ_END],STDIN_FILENO);
-                }
-                // If we are in a command that is in the middle, we will
-                // have to use two pipes, one for input and another for
-                // output. The position is also important in order to choose
-                // which file descriptor corresponds to each input/output
-            }else{ // for odd i
-                if (loop_1 % 2 != 0){
+            //Realiza dup no último comando
+            }else if (loop_1 == (qtdComandos - 1)){
+                //Faz o dup2
+                dup2(((qtdComandos % 2) != 0) ? des_p_1[READ_END] : des_p_2[READ_END], STDIN_FILENO);
+            //Realiza dup no comando do meio
+            }else{
+                if ((loop_1 % 2) != 0){
                     dup2(des_p_2[READ_END],STDIN_FILENO);
                     dup2(des_p_1[WRITE_END],STDOUT_FILENO);
                 }else{ // for even i
@@ -623,22 +592,24 @@ void trataPipe(char * tokens[]){
                     dup2(des_p_2[WRITE_END],STDOUT_FILENO);
                 }
             }
-
-            if (execvp(comandos[0],comandos) == -1){
-                kill(getpid(),SIGTERM);
+            //Executa o comando
+            if (execvp(comandos[0], comandos) == -1){
+                kill(getpid(), SIGTERM);
             }
         }
 
-        // CLOSING DESCRIPTORS ON PARENT
+        //Fechando os tickets
+        //Do inicio
         if (loop_1 == 0){
             close(des_p_2[WRITE_END]);
-        }
-        else if (loop_1 == num_cmds - 1){
-            if (num_cmds % 2 != 0){
+        //Do meio
+        } else if (loop_1 == qtdComandos - 1){
+            if ((qtdComandos % 2) != 0){
                 close(des_p_1[READ_END]);
             }else{
                 close(des_p_2[READ_END]);
             }
+        //Do processo final
         }else{
             if (loop_1 % 2 != 0){
                 close(des_p_2[READ_END]);
@@ -648,9 +619,31 @@ void trataPipe(char * tokens[]){
                 close(des_p_2[WRITE_END]);
             }
         }
-
+        //Espera
         waitpid(pid,NULL,0);
-
         loop_1++;
     }
+}
+int verificaQuantidadeComandos(char *tokens[]){
+    int cont = 0, qtdComandos = 0;
+    // .... | ..... | ..... | ..... => 3 pipes, porém 4 comandos,
+    //por isso o qtdComandos++ no final
+    while (tokens[cont] != NULL){
+        if (strcmp(tokens[cont], STR_PIPE) == 0){
+            qtdComandos++;
+        }
+        cont++;
+    }
+    qtdComandos++;
+    return qtdComandos;
+}
+
+//ERROS
+void showErro(char* toShow){
+    printf("\n########################################################################################\n");
+    printf("\nErro: %s\n", toShow);
+    printf("\n########################################################################################\n");
+}
+void showErroExecutarFork(){
+    showErro("Não foi possível realizar o fork!");
 }
