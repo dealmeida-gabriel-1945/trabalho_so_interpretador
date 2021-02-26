@@ -12,6 +12,8 @@
 //NÚMEROS
 #define LIMITE 256              // Número máximo de tokens por comando
 #define MAX_STR_LENGTH 1024     // Quantidade máxima de caracteres da linha de comando inserida
+#define READ_END    0
+#define WRITE_END	1
 
 //STRINGS
 #define STR_SAIDA "sair\n"
@@ -19,6 +21,7 @@
 #define STR_LEFT_ARROW "<"
 #define STR_RIGTH_ARROW ">"
 #define STR_E_COMERCIAL "&"
+#define STR_PIPE "|"
 
 //CHAR
 #define CHAR_LEFT_ARROW '<'
@@ -36,6 +39,7 @@ void prefixo();
 void despedida();
 //Logica
 int trataComando(char* tokens[]);
+void trataPipe(char* tokens[]);
 
 // Shell pid, pgid, terminal modes
 static pid_t GBSH_PID;
@@ -410,141 +414,6 @@ void pipeHandler(char * args[]){
 }
 
 /**
-* Method used to handle the commands entered via the standard input
-*/
-int commandHandler(char * args[]){
-    int i = 0;
-    int j = 0;
-
-    int fileDescriptor;
-    int standardOut;
-
-    int aux;
-    int background = 0;
-
-    char *args_aux[256];
-
-    // We look for the special characters and separate the command itself
-    // in a new array for the arguments
-    while ( args[j] != NULL){
-        if ( (strcmp(args[j],">") == 0) || (strcmp(args[j],"<") == 0) || (strcmp(args[j],"&") == 0)){
-            break;
-        }
-        args_aux[j] = args[j];
-        j++;
-    }
-
-    // 'exit' command quits the shell
-    if(strcmp(args[0],"exit") == 0) exit(0);
-        // 'pwd' command prints the current directory
-    else if (strcmp(args[0],"pwd") == 0){
-        if (args[j] != NULL){
-            // If we want file output
-            if ( (strcmp(args[j],">") == 0) && (args[j+1] != NULL) ){
-                fileDescriptor = open(args[j+1], O_CREAT | O_TRUNC | O_WRONLY, 0600);
-                // We replace de standard output with the appropriate file
-                standardOut = dup(STDOUT_FILENO); 	// first we make a copy of stdout
-                // because we'll want it back
-                dup2(fileDescriptor, STDOUT_FILENO);
-                close(fileDescriptor);
-                printf("%s\n", getcwd(currentDirectory, 1024));
-                dup2(standardOut, STDOUT_FILENO);
-            }
-        }else{
-            printf("%s\n", getcwd(currentDirectory, 1024));
-        }
-    }
-        // 'clear' command clears the screen
-    else if (strcmp(args[0],"clear") == 0) system("clear");
-        // 'cd' command to change directory
-    else if (strcmp(args[0],"cd") == 0) changeDirectory(args);
-        // 'environ' command to list the environment variables
-    else if (strcmp(args[0],"environ") == 0){
-        if (args[j] != NULL){
-            // If we want file output
-            if ( (strcmp(args[j],">") == 0) && (args[j+1] != NULL) ){
-                fileDescriptor = open(args[j+1], O_CREAT | O_TRUNC | O_WRONLY, 0600);
-                // We replace de standard output with the appropriate file
-                standardOut = dup(STDOUT_FILENO); 	// first we make a copy of stdout
-                // because we'll want it back
-                dup2(fileDescriptor, STDOUT_FILENO);
-                close(fileDescriptor);
-                manageEnviron(args,0);
-                dup2(standardOut, STDOUT_FILENO);
-            }
-        }else{
-            manageEnviron(args,0);
-        }
-    }
-        // 'setenv' command to set environment variables
-    else if (strcmp(args[0],"setenv") == 0) manageEnviron(args,1);
-        // 'unsetenv' command to undefine environment variables
-    else if (strcmp(args[0],"unsetenv") == 0) manageEnviron(args,2);
-    else{
-        // If none of the preceding commands were used, we invoke the
-        // specified program. We have to detect if I/O redirection,
-        // piped execution or background execution were solicited
-        while (args[i] != NULL && background == 0){
-            // If background execution was solicited (last argument '&')
-            // we exit the loop
-            if (strcmp(args[i],"&") == 0){
-                background = 1;
-                // If '|' is detected, piping was solicited, and we call
-                // the appropriate method that will handle the different
-                // executions
-            }else if (strcmp(args[i],"|") == 0){
-                pipeHandler(args);
-                return 1;
-                // If '<' is detected, we have Input and Output redirection.
-                // First we check if the structure given is the correct one,
-                // and if that is the case we call the appropriate method
-            }else if (strcmp(args[i],"<") == 0){
-                aux = i+1;
-                if (args[aux] == NULL || args[aux+1] == NULL || args[aux+2] == NULL ){
-                    printf("Not enough input arguments\n");
-                    return -1;
-                }else{
-                    if (strcmp(args[aux+1],">") != 0){
-                        printf("Usage: Expected '>' and found %s\n",args[aux+1]);
-                        return -2;
-                    }
-                }
-                fileIO(args_aux,args[i+1],args[i+3],1);
-                return 1;
-            }
-                // If '>' is detected, we have output redirection.
-                // First we check if the structure given is the correct one,
-                // and if that is the case we call the appropriate method
-            else if (strcmp(args[i],">") == 0){
-                if (args[i+1] == NULL){
-                    printf("Not enough input arguments\n");
-                    return -1;
-                }
-                fileIO(args_aux,NULL,args[i+1],0);
-                return 1;
-            }
-            i++;
-        }
-        // We launch the program with our method, indicating if we
-        // want background execution or not
-        args_aux[i] = NULL;
-        launchProg(args_aux,background);
-
-        /**
-         * For the part 1.e, we only had to print the input that was not
-         * 'exit', 'pwd' or 'clear'. We did it the following way
-         */
-        //	i = 0;
-        //	while(args[i]!=NULL){
-        //		printf("%s\n", args[i]);
-        //		i++;
-        //	}
-    }
-    return 1;
-}
-
-
-/**
 * Main method of our shell
 */
 int main(int argc, char *argv[], char ** envp) {
@@ -581,7 +450,7 @@ int main(int argc, char *argv[], char ** envp) {
             //Executa enquanto o srtok não retornar NULL (short way de realizar strtok)
             while((tokens[qtdTokens] = strtok(NULL, STR_VAZIA)) != NULL) qtdTokens++;
 
-            commandHandler(tokens);
+            trataComando(tokens);
         }
     }
     //Mostra a mensagem e despedida
@@ -607,7 +476,7 @@ void prefixo(){
 }
 //Logica
 int trataComando(char* tokens[]){
-    int i = 0, j = 0, descritorDeArquivo, out, aux, background = 0;
+    int i = 0, j = 0, descritorDeArquivo, out, aux;
     char *tokens_aux[LIMITE];
 
     //Separa sinais dos comandos (sinais: &, >, <)
@@ -624,54 +493,164 @@ int trataComando(char* tokens[]){
     //Aqui o auxiliar dos tokens terá apenas script, sem os sinais
     //Aqui, também, será executado os comandos
     while (tokens[i] != NULL){
-        //Se o comando
-        if (strcmp(tokens[i],"|") == 0){
-            pipeHandler(tokens);
+        //Se o comando for "|"
+        if (strcmp(tokens[i], STR_PIPE) == 0){
+            trataPipe(tokens);
             return 1;
-            // If '<' is detected, we have Input and Output redirection.
-            // First we check if the structure given is the correct one,
-            // and if that is the case we call the appropriate method
-        }else if (strcmp(tokens[i],"<") == 0){
+
+        //Se o comando for "<"
+        }else if (strcmp(tokens[i], STR_LEFT_ARROW) == 0){
             aux = i+1;
-            if (tokens[aux] == NULL || tokens[aux+1] == NULL || tokens[aux+2] == NULL ){
-                printf("Not enough input arguments\n");
-                return -1;
-            }else{
-                if (strcmp(tokens[aux+1],">") != 0){
-                    printf("Usage: Expected '>' and found %s\n",tokens[aux+1]);
-                    return -2;
-                }
-            }
-            fileIO(tokens_aux,tokens[i+1],tokens[i+3],1);
+            fileIO(tokens_aux, tokens[i+1], tokens[i+3],1);
             return 1;
-        }
-            // If '>' is detected, we have output redirection.
-            // First we check if the structure given is the correct one,
-            // and if that is the case we call the appropriate method
-        else if (strcmp(tokens[i],">") == 0){
-            if (tokens[i+1] == NULL){
-                printf("Not enough input arguments\n");
-                return -1;
-            }
-            fileIO(tokens_aux,NULL,tokens[i+1],0);
+
+        //Se o comando for ">"
+        }else if (strcmp(tokens[i], STR_RIGTH_ARROW) == 0){
+            fileIO(tokens_aux, NULL, tokens[i+1], 0);
             return 1;
         }
         i++;
     }
-    // We launch the program with our method, indicating if we
-    // want background execution or not
+    //Executa o resto dos tokens
     tokens_aux[i] = NULL;
-    launchProg(tokens_aux,background);
-
-    /**
-     * For the part 1.e, we only had to print the input that was not
-     * 'exit', 'pwd' or 'clear'. We did it the following way
-     */
-    //	i = 0;
-    //	while(args[i]!=NULL){
-    //		printf("%s\n", args[i]);
-    //		i++;
-    //	}
+    launchProg(tokens_aux,0);
 
     return 1;
+}
+void trataPipe(char * tokens[]){
+    //Variáveis dos laços de repetição
+    int loop_1 = 0;
+    int loop_2 = 0;
+    int loop_3 = 0;
+    int loop_4 = 0;
+    //Tickets
+    /*
+     * 0 READ (READ_END)
+     * 1 WRITE (WRITE_END)
+     * */
+    int des_p_1[2], des_p_2[2];
+    //Controles
+    int num_cmds = 0, finalizar = 0;
+    //Vetor comandos
+    char *comandos[256];
+    //Objeto do PId
+    pid_t pid;
+
+    // First we calculate the number of commands (they are separated
+    // by '|')
+    while (tokens[loop_4] != NULL){
+        if (strcmp(tokens[loop_4], STR_PIPE) == 0){
+            num_cmds++;
+        }
+        loop_4++;
+    }
+    num_cmds++;
+
+    // Main loop of this method. For each command between '|', the
+    // pipes will be configured and standard input and/or output will
+    // be replaced. Then it will be executed
+    while (tokens[loop_2] != NULL && finalizar != 1){
+        loop_3 = 0;
+        // We use an auxiliary array of pointers to store the command
+        // that will be executed on each iteration
+        while (strcmp(tokens[loop_2], STR_PIPE) != 0){
+            comandos[loop_3] = tokens[loop_2];
+            loop_2++;
+            if (tokens[loop_2] == NULL){
+                // 'end' variable used to keep the program from entering
+                // again in the loop when no more arguments are found
+                finalizar = 1;
+                loop_3++;
+                break;
+            }
+            loop_3++;
+        }
+        // Last position of the command will be NULL to indicate that
+        // it is its end when we pass it to the exec function
+        comandos[loop_3] = NULL;
+        loop_2++;
+
+        // Depending on whether we are in an iteration or another, we
+        // will set different descriptors for the pipes inputs and
+        // output. This way, a pipe will be shared between each two
+        // iterations, enabling us to connect the inputs and outputs of
+        // the two different commands.
+        if (loop_1 % 2 != 0){
+            pipe(des_p_1); // for odd i
+        }else{
+            pipe(des_p_2); // for even i
+        }
+
+        pid=fork();
+
+        if(pid==-1){
+            if (loop_1 != num_cmds - 1){
+                if (loop_1 % 2 != 0){
+                    close(des_p_1[WRITE_END]); // for odd i
+                }else{
+                    close(des_p_2[WRITE_END]); // for even i
+                }
+            }
+            printf("Child process could not be created\n");
+            return;
+        }
+        if(pid==0){
+            // If we are in the first command
+            if (loop_1 == 0){
+                dup2(des_p_2[WRITE_END], STDOUT_FILENO);
+            }
+                // If we are in the last command, depending on whether it
+                // is placed in an odd or even position, we will replace
+                // the standard input for one pipe or another. The standard
+                // output will be untouched because we want to see the
+                // output in the terminal
+            else if (loop_1 == num_cmds - 1){
+                if (num_cmds % 2 != 0){ // for odd number of commands
+                    dup2(des_p_1[READ_END],STDIN_FILENO);
+                }else{ // for even number of commands
+                    dup2(des_p_2[READ_END],STDIN_FILENO);
+                }
+                // If we are in a command that is in the middle, we will
+                // have to use two pipes, one for input and another for
+                // output. The position is also important in order to choose
+                // which file descriptor corresponds to each input/output
+            }else{ // for odd i
+                if (loop_1 % 2 != 0){
+                    dup2(des_p_2[READ_END],STDIN_FILENO);
+                    dup2(des_p_1[WRITE_END],STDOUT_FILENO);
+                }else{ // for even i
+                    dup2(des_p_1[READ_END],STDIN_FILENO);
+                    dup2(des_p_2[WRITE_END],STDOUT_FILENO);
+                }
+            }
+
+            if (execvp(comandos[0],comandos) == -1){
+                kill(getpid(),SIGTERM);
+            }
+        }
+
+        // CLOSING DESCRIPTORS ON PARENT
+        if (loop_1 == 0){
+            close(des_p_2[WRITE_END]);
+        }
+        else if (loop_1 == num_cmds - 1){
+            if (num_cmds % 2 != 0){
+                close(des_p_1[READ_END]);
+            }else{
+                close(des_p_2[READ_END]);
+            }
+        }else{
+            if (loop_1 % 2 != 0){
+                close(des_p_2[READ_END]);
+                close(des_p_1[WRITE_END]);
+            }else{
+                close(des_p_1[READ_END]);
+                close(des_p_2[WRITE_END]);
+            }
+        }
+
+        waitpid(pid,NULL,0);
+
+        loop_1++;
+    }
 }
